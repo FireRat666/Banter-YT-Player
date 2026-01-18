@@ -188,6 +188,14 @@
         const logContainer = document.getElementById('log-container');
         const MAX_LOG_ENTRIES = 100;
 
+        // Capture original console methods to prevent recursion
+        const originalConsole = {
+            log: console.log,
+            info: console.info,
+            warn: console.warn,
+            error: console.error
+        };
+
         // --- On-Screen Debugging ---
         function uiLog(level, ...args) {
             // 1. Format the message
@@ -213,14 +221,15 @@
             }
             
             // 4. Also send to native console
-            console[level] ? console[level](...args) : console.log(...args);
+            const logFn = originalConsole[level] || originalConsole.log;
+            logFn.apply(console, args);
 
             // 5. Forward to space script if possible
             if(window.bantermessage) {
                  try {
                     window.bantermessage(JSON.stringify({ type: "LOG", data: `[PlaylistUI] ${message}` }));
                 } catch (e) {
-                    console.error("Failed to send log message to space:", e);
+                    originalConsole.error("Failed to send log message to space:", e);
                 }
             }
         }
@@ -248,6 +257,14 @@
         // --- App Logic ---
         console.log("Page loaded");
         console.info("window.bantermessage available:", typeof window.bantermessage === 'function');
+
+        // Poll for bantermessage availability in case it is injected late
+        const banterCheckInterval = setInterval(() => {
+            if (typeof window.bantermessage === 'function') {
+                console.info("window.bantermessage became available asynchronously!");
+                clearInterval(banterCheckInterval);
+            }
+        }, 500);
 
         let currentState = {
             playlist: [],
