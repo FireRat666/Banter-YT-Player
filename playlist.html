@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Banter Video Playlist</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0;
+            font: 16px 'Roboto', sans-serif;
+            background: linear-gradient(to bottom, #6a6e83, #332834);
+            color: white;
+            height: 100%;
+            overflow: hidden;
+        }
+        .header {
+            background: #3f3f3f;
+            padding: 12px 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .title { font-size: 1.4em; margin-right: 15px; }
+        .mode-label { font-size: 0.9em; color: #aaa; margin-left: 10px; }
+        .host-bar {
+            background: #16181f;
+            padding: 8px 15px;
+            font-style: italic;
+            font-size: 0.95em;
+        }
+        .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+        .btn {
+            padding: 10px 14px;
+            background: #00b894;
+            border: none;
+            color: white;
+            font-size: 1.1em;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn.red { background: #d63031; }
+        .btn.grey { background: #636e72; }
+        .btn.locked { background: #27ae60; }
+        .playlist-container {
+            flex: 1;
+            overflow-y: auto;
+            background: linear-gradient(to right, #1e181f, #2b313e);
+            padding: 10px;
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            background: #3d3d3d;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            gap: 12px;
+        }
+        .item.active { border-left: 4px solid #00b894; background: #4a4a4a; }
+        .item-thumb {
+            width: 80px;
+            height: 60px;
+            object-fit: cover;
+            background: #222;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .item-info { flex: 1; overflow: hidden; }
+        .item-title {
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .item-user { font-size: 0.85em; color: #b2bec3; margin-top: 4px; }
+        .item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+        .item-btn {
+            padding: 8px 12px;
+            background: #555;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .item-btn:hover { background: #666; }
+        .item-btn.play { background: #00b894; }
+        .item-btn.remove { background: #d63031; }
+        .footer {
+            background: #3f3f3f;
+            padding: 12px 15px;
+            display: flex;
+            gap: 10px;
+        }
+        .footer input {
+            flex: 1;
+            padding: 12px;
+            font-size: 1.1em;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #222;
+            color: white;
+        }
+        .footer input::placeholder { color: #888; }
+        .empty-msg {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+            font-size: 1.2em;
+        }
+        /* Layout wrapper */
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* On-screen Debug Console */
+        #log-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 25%;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            overflow-y: scroll;
+            display: flex;
+            flex-direction: column-reverse;
+            padding: 5px;
+            border-top: 1px solid #555;
+            z-index: 9999;
+        }
+        .log-msg {
+            margin-bottom: 2px;
+            padding: 2px 4px;
+            border-radius: 2px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .log-msg.info { color: #fff; }
+        .log-msg.warn { background-color: #ffc107; color: #000; }
+        .log-msg.error { background-color: #dc3545; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="header">
+            <div style="display: flex; align-items: baseline;">
+                <span class="title">Video Playlist</span>
+                <span class="mode-label" id="modeLabel">Playlist Mode</span>
+            </div>
+            <div class="controls">
+                <button class="btn" id="lockBtn">Unlocked</button>
+                <button class="btn grey" id="prevBtn">&lt;&lt; Prev</button>
+                <button class="btn grey" id="nextBtn">Next &gt;&gt;</button>
+            </div>
+        </div>
+        <div class="host-bar" id="hostBar">No host</div>
+        <div class="playlist-container" id="playlist"></div>
+        <div class="footer">
+            <input type="text" id="urlInput" placeholder="Paste YouTube URL or search term...">
+            <button class="btn" id="addBtn">Add</button>
+        </div>
+    </div>
+
+    <div id="log-container"></div>
+
+    <script>
+        // --- Remote Debugging & Communication ---
+        const logContainer = document.getElementById('log-container');
+        const MAX_LOG_ENTRIES = 50;
+
+        function debugLog(level, ...args) {
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    try { return JSON.stringify(arg); } catch (e) { return 'Unserializable Object'; }
+                }
+                return String(arg);
+            }).join(' ');
+
+            const logString = `[PlaylistUI][${level.toUpperCase()}] ${message}`;
+
+            // 1. Log to the local browser console (if accessible)
+            console[level](logString);
+
+            // 2. Send the log to the space script for remote viewing
+            if (window.bantermessage) {
+                try {
+                    window.bantermessage(JSON.stringify({ type: "LOG", data: logString }));
+                } catch (e) {
+                    console.error("Failed to send log message to space:", e);
+                }
+            }
+            
+            // 3. Display the log in the on-page UI
+            const logElement = document.createElement('div');
+            logElement.className = `log-msg ${level}`;
+            logElement.textContent = message; // Show simplified message on UI
+            
+            logContainer.insertBefore(logElement, logContainer.firstChild);
+
+            // Trim old log entries
+            while (logContainer.children.length > MAX_LOG_ENTRIES) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+
+        debugLog('info', 'Page loaded');
+        debugLog('info', 'window.bantermessage available:', typeof window.bantermessage === 'function');
+
+        let currentState = {
+            playlist: [],
+            index: 0,
+            locked: false,
+            hostId: "",
+            mode: "playlist"
+        };
+        let myUserId = "";
+
+        // Parse URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const userParam = urlParams.get('user');
+        if (userParam) {
+            myUserId = userParam.split('-_-')[0];
+        }
+        const instanceId = urlParams.get('instance') || 'default-room';
+        const mode = urlParams.get('mode') || 'playlist';
+        
+        debugLog('info', 'URL params - instance:', instanceId, 'mode:', mode, 'user:', myUserId);
+
+        document.getElementById('modeLabel').textContent = mode === 'karaoke' ? 'Karaoke Mode' : 'Playlist Mode';
+
+        // Listen for state updates from native script
+        window.addEventListener("bantermessage", (e) => {
+            debugLog('info', 'Received bantermessage with detail:', e.detail);
+            let messageString;
+            if (typeof e.detail === 'string') {
+                messageString = e.detail;
+            } else if (e.detail && typeof e.detail.message === 'string') {
+                messageString = e.detail.message;
+            } else {
+                debugLog('warn', 'Received bantermessage, but payload is in an unrecognized format.');
+                return;
+            }
+
+            try {
+                const msg = JSON.parse(messageString);
+                debugLog('info', 'Parsed message type:', msg.type);
+                if (msg.type === "STATE") {
+                    currentState = msg.data;
+                    debugLog('info', 'State received, playlist length:', currentState.playlist?.length);
+                    render();
+                }
+            } catch (err) {
+                debugLog('error', "Failed to parse message string:", messageString, err);
+            }
+        });
+
+        // Send command to native script
+        function send(type, data) {
+            debugLog('info', 'Sending command:', type, data);
+            if (window.bantermessage) {
+                const msg = JSON.stringify({ type, data });
+                window.bantermessage(msg);
+            } else {
+                debugLog('warn', "No bantermessage function available!");
+            }
+        }
+
+        // --- UI ---
+        document.getElementById('lockBtn').addEventListener('click', () => send('LOCK'));
+        document.getElementById('prevBtn').addEventListener('click', () => send('PREV'));
+        document.getElementById('nextBtn').addEventListener('click', () => send('NEXT'));
+        document.getElementById('addBtn').addEventListener('click', addVideo);
+        document.getElementById('urlInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addVideo();
+        });
+
+        function addVideo() {
+            const input = document.getElementById('urlInput');
+            const value = input.value.trim();
+            if (value) {
+                send('ADD', value);
+                input.value = '';
+            }
+        }
+
+        function playItem(index) { send('SET_TRACK', index); }
+        function removeItem(index) { send('REMOVE', index); }
+
+        function render() {
+            const playlist = currentState.playlist || [];
+            const currentIndex = currentState.index || 0;
+            const isLocked = currentState.locked;
+            const isKaraoke = currentState.mode === 'karaoke';
+
+            document.getElementById('lockBtn').textContent = isLocked ? 'Locked' : 'Unlocked';
+            document.getElementById('lockBtn').className = isLocked ? 'btn locked' : 'btn red';
+
+            const hostBar = document.getElementById('hostBar');
+            hostBar.textContent = isLocked && currentState.hostId ? 'Locked by host' : (isKaraoke ? 'Karaoke Queue' : 'Open playlist');
+
+            const container = document.getElementById('playlist');
+            if (playlist.length === 0) {
+                container.innerHTML = '<div class="empty-msg">No videos in playlist. Add one below!</div>';
+                return;
+            }
+
+            container.innerHTML = playlist.map((vid, idx) => `
+                <div class="item ${idx === currentIndex ? 'active' : ''}">
+                    <img class="item-thumb" src="https://img.youtube.com/vi/${vid.id}/mqdefault.jpg" 
+                         onerror="this.src='https://via.placeholder.com/80x60?text=No+Thumb'">
+                    <div class="item-info">
+                        <div class="item-title">${escapeHtml(vid.title || 'Untitled')}</div>
+                        <div class="item-user">${isKaraoke ? 'Singer: ' : 'Added by '}${escapeHtml(vid.user || 'Unknown')}</div>
+                    </div>
+                    <div class="item-actions">
+                        ${(!isKaraoke || idx === 0) ? `<button class="item-btn play" onclick="playItem(${idx})">Play</button>` : ''}
+                        <button class="item-btn remove" onclick="removeItem(${idx})">Remove</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        render();
+        send('REQUEST_STATE');
+    </script>
+</body>
+</html>

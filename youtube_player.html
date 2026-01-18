@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube Player</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+        #player { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="player"></div>
+
+    <script>
+        let player;
+        let currentVideoId = '';
+        let targetVolume = 100;
+        let isReady = false;
+
+        // --- Remote Debugging & Communication ---
+        function debugLog(level, ...args) {
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    try { return JSON.stringify(arg); } catch (e) { return 'Unserializable Object'; }
+                }
+                return String(arg);
+            }).join(' ');
+
+            const logString = `[YTPlayer][${level.toUpperCase()}] ${message}`;
+            console[level](logString); // Log locally just in case
+            send('LOG', logString); // Send to space
+        }
+
+        function send(type, data) {
+            if (window.bantermessage) {
+                window.bantermessage(JSON.stringify({ type, data }));
+            } else {
+                // Cannot debugLog here as it would cause an infinite loop
+                console.warn('[YTPlayer] Cannot send message, window.bantermessage is not defined.');
+            }
+        }
+
+        // --- YouTube IFrame API Setup ---
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(tag);
+
+        window.onYouTubeIframeAPIReady = function() {
+            debugLog('info', 'YouTube IFrame API is ready.');
+            player = new YT.Player('player', {
+                width: '100%',
+                height: '100%',
+                playerVars: {
+                    autoplay: 1, controls: 0, disablekb: 1, fs: 0,
+                    modestbranding: 1, rel: 0, showinfo: 0,
+                    iv_load_policy: 3, playsinline: 1,
+                    origin: window.location.origin
+                },
+                events: {
+                    onReady: onPlayerReady,
+                    onStateChange: onPlayerStateChange,
+                    onError: onPlayerError
+                }
+            });
+        };
+
+        // --- Player Event Handlers ---
+        function onPlayerReady(event) {
+            isReady = true;
+            player.setVolume(targetVolume);
+            debugLog('info', 'Player is ready.');
+            sendStatus('ready');
+        }
+
+        function onPlayerStateChange(event) {
+            const stateMap = { [-1]:'unstarted', [0]:'ended', [1]:'playing', [2]:'paused', [3]:'buffering', [5]:'cued' };
+            const status = stateMap[event.data] || 'unknown';
+            debugLog('info', 'Player state changed to:', status);
+            sendStatus(status);
+
+            if (event.data === YT.PlayerState.ENDED) {
+                debugLog('info', 'Video ended, sending VIDEO_ENDED command.');
+                send('VIDEO_ENDED');
+            }
+        }
+
+        function onPlayerError(event) {
+            debugLog('error', 'YouTube Player Error. Code:', event.data);
+            send('VIDEO_ERROR', { code: event.data });
+        }
+
+        function sendStatus(status) {
+            const statusData = {
+                status,
+                time: player ? player.getCurrentTime() : 0,
+                duration: player ? player.getDuration() : 0
+            };
+            // This is noisy, so only send if needed for debugging, or keep it light.
+            // send('PLAYER_STATUS', statusData);
+        }
+
+        // --- Command Handling ---
+        window.addEventListener('bantermessage', (e) => {
+            if (!e.detail || !e.detail.message) return;
+
+            debugLog('info', 'Received bantermessage:', e.detail.message);
+            try {
+                const msg = JSON.parse(e.detail.message);
+                handleCommand(msg);
+            } catch (err) {
+                debugLog('error', 'Failed to parse incoming command.', err, e.detail.message);
+            }
+        });
+
+        function handleCommand(msg) {
+            if (!msg || !msg.type) return;
+            debugLog('info', `Handling command: ${msg.type}`, msg.data || '');
+
+            if (!player || !isReady) {
+                debugLog('warn', `Player not ready, ignoring command: ${msg.type}`);
+                // Could queue commands here if needed
+                return;
+            }
+
+            switch (msg.type) {
+                case 'LOAD_VIDEO':
+                    currentVideoId = msg.data.id;
+                    player.loadVideoById(msg.data.id, msg.data.startTime || 0);
+                    break;
+                case 'PLAY':
+                    player.playVideo();
+                    break;
+                case 'PAUSE':
+                    player.pauseVideo();
+                    break;
+                case 'SET_VOLUME':
+                    targetVolume = msg.data;
+                    player.setVolume(msg.data);
+                    break;
+                case 'MUTE':
+                    player.mute();
+                    break;
+                case 'UNMUTE':
+                    player.unMute();
+                    break;
+                case 'SEEK':
+                    player.seekTo(msg.data, true);
+                    break;
+                case 'GET_TIME':
+                    sendStatus(player.getPlayerState() === 1 ? 'playing' : 'paused');
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>
