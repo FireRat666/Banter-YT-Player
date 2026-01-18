@@ -244,13 +244,21 @@
         };
 
         // --- Bantermessage Polyfill ---
-        if (!window.bantermessage && window.parent && window.parent !== window) {
-            window.bantermessage = function(message) {
-                // Use the on-screen logger.
-                uiLog('info', "Polyfill: Sending postMessage to parent:", message);
-                window.parent.postMessage(message, "*");
-            };
-            uiLog('info', "Bantermessage postMessage polyfill has been INSTALLED.");
+        if (!window.bantermessage) {
+            if (window.BanterMessage) {
+                window.bantermessage = window.BanterMessage;
+                uiLog('info', "Mapped window.BanterMessage to window.bantermessage");
+            } else if (window.vuplex) {
+                window.bantermessage = function(message) { window.vuplex.postMessage(message); };
+                uiLog('info', "Mapped window.vuplex.postMessage to window.bantermessage");
+            } else {
+                window.bantermessage = function(message) {
+                    uiLog('info', "Polyfill: Sending postMessage:", message);
+                    window.postMessage(message, "*");
+                    if (window.parent && window.parent !== window) window.parent.postMessage(message, "*");
+                };
+                uiLog('info', "Bantermessage postMessage polyfill INSTALLED (Force).");
+            }
         }
 
 
