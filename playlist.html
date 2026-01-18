@@ -234,6 +234,16 @@
             uiLog('error', `Uncaught: ${message}`, error);
         };
 
+        // --- Bantermessage Polyfill ---
+        if (!window.bantermessage && window.parent && window.parent !== window) {
+            window.bantermessage = function(message) {
+                // Use the on-screen logger.
+                uiLog('info', "Polyfill: Sending postMessage to parent:", message);
+                window.parent.postMessage(message, "*");
+            };
+            uiLog('info', "Bantermessage postMessage polyfill has been INSTALLED.");
+        }
+
 
         // --- App Logic ---
         console.log("Page loaded");
