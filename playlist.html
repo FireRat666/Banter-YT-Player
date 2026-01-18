@@ -121,6 +121,8 @@
             display: flex;
             flex-direction: column;
             height: 100%;
+            /* Make room for the debug console */
+            padding-bottom: 25%;
         }
 
         /* On-screen Debug Console */
@@ -130,13 +132,13 @@
             left: 0;
             right: 0;
             height: 25%;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.8);
             color: #fff;
             font-family: 'Courier New', Courier, monospace;
             font-size: 12px;
             overflow-y: scroll;
             display: flex;
-            flex-direction: column-reverse;
+            flex-direction: column-reverse; /* Newest logs on top */
             padding: 5px;
             border-top: 1px solid #555;
             z-index: 9999;
@@ -147,10 +149,16 @@
             border-radius: 2px;
             white-space: pre-wrap;
             word-break: break-all;
+            animation: fadeIn 0.3s;
         }
-        .log-msg.info { color: #fff; }
-        .log-msg.warn { background-color: #ffc107; color: #000; }
-        .log-msg.error { background-color: #dc3545; color: #fff; }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .log-msg.log { color: #fff; }
+        .log-msg.info { color: #8bf; }
+        .log-msg.warn { background-color: #ffc107; color: #000; font-weight: bold; }
+        .log-msg.error { background-color: #dc3545; color: #fff; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -177,48 +185,59 @@
     <div id="log-container"></div>
 
     <script>
-        // --- Remote Debugging & Communication ---
         const logContainer = document.getElementById('log-container');
-        const MAX_LOG_ENTRIES = 50;
+        const MAX_LOG_ENTRIES = 100;
 
-        function debugLog(level, ...args) {
+        // --- On-Screen Debugging ---
+        function uiLog(level, ...args) {
+            // 1. Format the message
             const message = args.map(arg => {
-                if (typeof arg === 'object') {
-                    try { return JSON.stringify(arg); } catch (e) { return 'Unserializable Object'; }
+                if (arg instanceof Error) return arg.stack;
+                if (typeof arg === 'object' && arg !== null) {
+                    try { return JSON.stringify(arg, null, 2); } catch (e) { return '[Unserializable Object]'; }
                 }
                 return String(arg);
             }).join(' ');
 
-            const logString = `[PlaylistUI][${level.toUpperCase()}] ${message}`;
+            // 2. Display in the on-page UI
+            const logElement = document.createElement('div');
+            logElement.className = `log-msg ${level}`;
+            logElement.textContent = message;
+            
+            // Insert at the top
+            logContainer.insertBefore(logElement, logContainer.firstChild);
 
-            // 1. Log to the local browser console (if accessible)
-            console[level](logString);
+            // 3. Trim old log entries
+            while (logContainer.children.length > MAX_LOG_ENTRIES) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+            
+            // 4. Also send to native console
+            console[level] ? console[level](...args) : console.log(...args);
 
-            // 2. Send the log to the space script for remote viewing
-            if (window.bantermessage) {
-                try {
-                    window.bantermessage(JSON.stringify({ type: "LOG", data: logString }));
+            // 5. Forward to space script if possible
+            if(window.bantermessage) {
+                 try {
+                    window.bantermessage(JSON.stringify({ type: "LOG", data: `[PlaylistUI] ${message}` }));
                 } catch (e) {
                     console.error("Failed to send log message to space:", e);
                 }
             }
-            
-            // 3. Display the log in the on-page UI
-            const logElement = document.createElement('div');
-            logElement.className = `log-msg ${level}`;
-            logElement.textContent = message; // Show simplified message on UI
-            
-            logContainer.insertBefore(logElement, logContainer.firstChild);
-
-            // Trim old log entries
-            while (logContainer.children.length > MAX_LOG_ENTRIES) {
-                logContainer.removeChild(logContainer.lastChild);
-            }
         }
 
+        // Override default console methods
+        console.log = (...args) => uiLog('log', ...args);
+        console.info = (...args) => uiLog('info', ...args);
+        console.warn = (...args) => uiLog('warn', ...args);
+        console.error = (...args) => uiLog('error', ...args);
+        window.onerror = (message, source, lineno, colno, error) => {
+            uiLog('error', `Uncaught: ${message}`, error);
+        };
 
-        debugLog('info', 'Page loaded');
-        debugLog('info', 'window.bantermessage available:', typeof window.bantermessage === 'function');
+
+        // --- App Logic ---
+        console.log("Page loaded");
+        console.info("window.bantermessage available:", typeof window.bantermessage === 'function');
 
         let currentState = {
             playlist: [],
@@ -238,44 +257,48 @@
         const instanceId = urlParams.get('instance') || 'default-room';
         const mode = urlParams.get('mode') || 'playlist';
         
-        debugLog('info', 'URL params - instance:', instanceId, 'mode:', mode, 'user:', myUserId);
+        console.info('URL params - instance:', instanceId, 'mode:', mode, 'user:', myUserId);
 
         document.getElementById('modeLabel').textContent = mode === 'karaoke' ? 'Karaoke Mode' : 'Playlist Mode';
 
         // Listen for state updates from native script
         window.addEventListener("bantermessage", (e) => {
-            debugLog('info', 'Received bantermessage with detail:', e.detail);
+            console.log('Received bantermessage:', e);
             let messageString;
             if (typeof e.detail === 'string') {
                 messageString = e.detail;
             } else if (e.detail && typeof e.detail.message === 'string') {
                 messageString = e.detail.message;
             } else {
-                debugLog('warn', 'Received bantermessage, but payload is in an unrecognized format.');
+                console.warn('Received bantermessage, but payload is in an unrecognized format.');
                 return;
             }
 
             try {
                 const msg = JSON.parse(messageString);
-                debugLog('info', 'Parsed message type:', msg.type);
+                console.info('Parsed message type:', msg.type);
                 if (msg.type === "STATE") {
                     currentState = msg.data;
-                    debugLog('info', 'State received, playlist length:', currentState.playlist?.length);
+                    console.log('State received, playlist length:', currentState.playlist?.length);
                     render();
                 }
             } catch (err) {
-                debugLog('error', "Failed to parse message string:", messageString, err);
+                console.error("Failed to parse message string:", messageString, err);
             }
         });
 
         // Send command to native script
         function send(type, data) {
-            debugLog('info', 'Sending command:', type, data);
+            console.info('Sending command:', type, data);
             if (window.bantermessage) {
-                const msg = JSON.stringify({ type, data });
-                window.bantermessage(msg);
+                try {
+                    const msg = JSON.stringify({ type, data });
+                    window.bantermessage(msg);
+                } catch(e) {
+                    console.error("Error sending bantermessage:", e);
+                }
             } else {
-                debugLog('warn', "No bantermessage function available!");
+                console.warn("No bantermessage function available!");
             }
         }
 
@@ -301,6 +324,7 @@
         function removeItem(index) { send('REMOVE', index); }
 
         function render() {
+            console.log("Rendering UI with state:", currentState);
             const playlist = currentState.playlist || [];
             const currentIndex = currentState.index || 0;
             const isLocked = currentState.locked;
@@ -340,6 +364,7 @@
             return div.innerHTML;
         }
 
+        // Initial render and state request
         render();
         send('REQUEST_STATE');
     </script>
