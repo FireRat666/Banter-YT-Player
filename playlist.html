@@ -243,13 +243,10 @@
             uiLog('error', `Uncaught: ${message}`, error);
         };
 
-        // --- Bantermessage Polyfill Removed ---
-        // Relying on native injection. If not present immediately, we wait/check before sending.
-
-
         // --- App Logic ---
         console.log("Page loaded");
         console.info("window.bantermessage available:", typeof window.bantermessage === 'function');
+        console.info("window.bantermenumessage available:", typeof window.bantermenumessage === 'function');
 
         // Poll for bantermessage availability in case it is injected late
         const banterCheckInterval = setInterval(() => {
@@ -284,13 +281,23 @@
         // Listen for state updates from native script
         window.addEventListener("bantermessage", (e) => {
             console.log('Received bantermessage:', e);
+            handleMessage(e);
+        });
+
+        // // Listen for state updates from menu browser
+        // window.addEventListener("bantermenumessage", (e) => {
+        //     console.log('Received bantermenumessage:', e);
+        //     handleMessage(e);
+        // });
+
+        function handleMessage(e) {
             let messageString;
             if (typeof e.detail === 'string') {
                 messageString = e.detail;
             } else if (e.detail && typeof e.detail.message === 'string') {
                 messageString = e.detail.message;
             } else {
-                console.warn('Received bantermessage, but payload is in an unrecognized format.');
+                console.warn('Received message, but payload is in an unrecognized format.');
                 return;
             }
 
@@ -305,28 +312,41 @@
             } catch (err) {
                 console.error("Failed to parse message string:", messageString, err);
             }
-        });
+        }
 
         // Send command to native script
         function send(type, data) {
             console.info('Sending command:', type, data);
+            const msg = JSON.stringify({ type, data });
+
+            // Try sending via bantermessage (in-world browser)
             if (window.bantermessage) {
                 try {
-                    const msg = JSON.stringify({ type, data });
                     window.bantermessage(msg);
+                    return;
                 } catch(e) {
                     console.error("Error sending bantermessage:", e);
                 }
-            } else {
-                console.warn("No bantermessage function available!");
             }
+
+            // Try sending via bantermenumessage (menu browser)
+            if (window.bantermenumessage) {
+                try {
+                    window.bantermenumessage(msg);
+                    return;
+                } catch(e) {
+                    console.error("Error sending bantermenumessage:", e);
+                }
+            }
+
+            console.warn("No messaging function available (neither bantermessage nor bantermenumessage)!");
         }
 
         // --- UI ---
         document.getElementById('lockBtn').addEventListener('click', () => send('LOCK'));
         document.getElementById('prevBtn').addEventListener('click', () => send('PREV'));
         document.getElementById('nextBtn').addEventListener('click', () => send('NEXT'));
-        document.getElementById('addBtn').addEventListener('click', addVideo);
+        document.getElementById('addBtn').addEventListener('click', () => addVideo());
         document.getElementById('urlInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') addVideo();
         });
@@ -340,8 +360,9 @@
             }
         }
 
-        function playItem(index) { send('SET_TRACK', index); }
-        function removeItem(index) { send('REMOVE', index); }
+        // Expose functions to global scope for inline onclick handlers
+        window.playItem = function(index) { send('SET_TRACK', index); }
+        window.removeItem = function(index) { send('REMOVE', index); }
 
         function render() {
             console.log("Rendering UI with state:", currentState);
