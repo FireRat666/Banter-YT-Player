@@ -94,6 +94,7 @@
         .item-btn:hover { background: #666; }
         .item-btn.play { background: #00b894; }
         .item-btn.remove { background: #d63031; }
+        .item-btn.move { background: #0984e3; }
         .footer {
             background: #3f3f3f;
             padding: 12px 15px;
@@ -316,6 +317,7 @@
 
         // Send command to native script
         function send(type, data) {
+            if (data === undefined) data = null;
             console.info('Sending command:', type, data);
             const msg = JSON.stringify({ type, data });
 
@@ -363,6 +365,11 @@
         // Expose functions to global scope for inline onclick handlers
         window.playItem = function(index) { send('SET_TRACK', index); }
         window.removeItem = function(index) { send('REMOVE', index); }
+        window.moveItem = function(index, delta) {
+            const newIndex = index + delta;
+            if (newIndex < 0 || newIndex >= currentState.playlist.length) return;
+            send('MOVE', { from: index, to: newIndex });
+        }
 
         function render() {
             console.log("Rendering UI with state:", currentState);
@@ -393,6 +400,8 @@
                     </div>
                     <div class="item-actions">
                         ${(!isKaraoke || idx === 0) ? `<button class="item-btn play" onclick="playItem(${idx})">Play</button>` : ''}
+                        ${idx > 0 ? `<button class="item-btn move" onclick="moveItem(${idx}, -1)">↑</button>` : ''}
+                        ${idx < playlist.length - 1 ? `<button class="item-btn move" onclick="moveItem(${idx}, 1)">↓</button>` : ''}
                         <button class="item-btn remove" onclick="removeItem(${idx})">Remove</button>
                     </div>
                 </div>
