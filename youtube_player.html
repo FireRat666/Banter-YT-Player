@@ -80,9 +80,25 @@
             debugLog('info', 'Player state changed to:', status);
             sendStatus(status);
 
+            if (event.data === YT.PlayerState.PLAYING) {
+                sendVideoInfo();
+            }
+
             if (event.data === YT.PlayerState.ENDED) {
                 debugLog('info', 'Video ended, sending VIDEO_ENDED command.');
                 send('VIDEO_ENDED');
+            }
+        }
+
+        function sendVideoInfo() {
+            if (!player) return;
+            const duration = player.getDuration();
+            const data = player.getVideoData();
+            const title = data ? data.title : '';
+
+            if (duration && title) {
+                debugLog('info', `Sending VIDEO_INFO: ${title} (${duration}s)`);
+                send('VIDEO_INFO', { duration, title });
             }
         }
 
@@ -103,14 +119,16 @@
 
         // --- Command Handling ---
         window.addEventListener('bantermessage', (e) => {
-            if (!e.detail || !e.detail.message) return;
+            let msgString = e.detail;
+            if (typeof e.detail !== 'string' && e.detail && e.detail.message) msgString = e.detail.message;
+            if (!msgString) return;
 
-            debugLog('info', 'Received bantermessage:', e.detail.message);
+            debugLog('info', 'Received bantermessage:', msgString);
             try {
-                const msg = JSON.parse(e.detail.message);
+                const msg = JSON.parse(msgString);
                 handleCommand(msg);
             } catch (err) {
-                debugLog('error', 'Failed to parse incoming command.', err, e.detail.message);
+                debugLog('error', 'Failed to parse incoming command.', err, msgString);
             }
         });
 

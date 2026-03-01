@@ -36,11 +36,11 @@
         }
         .controls { display: flex; gap: 6px; flex-wrap: wrap; }
         .btn {
-            padding: 10px 14px;
+            padding: 8px 12px;
             background: #00b894;
             border: none;
             color: white;
-            font-size: 1.1em;
+            font-size: 1em;
             border-radius: 4px;
             cursor: pointer;
             user-select: none;
@@ -49,6 +49,8 @@
         .btn.red { background: #d63031; }
         .btn.grey { background: #636e72; }
         .btn.locked { background: #27ae60; }
+        .btn.blue { background: #0984e3; }
+
         .playlist-container {
             flex: 1;
             overflow-y: auto;
@@ -63,6 +65,8 @@
             margin-bottom: 8px;
             border-radius: 6px;
             gap: 12px;
+            position: relative;
+            overflow: hidden;
         }
         .item.active { border-left: 4px solid #00b894; background: #4a4a4a; }
         .item-thumb {
@@ -72,16 +76,17 @@
             background: #222;
             border-radius: 4px;
             flex-shrink: 0;
+            z-index: 1;
         }
-        .item-info { flex: 1; overflow: hidden; }
+        .item-info { flex: 1; overflow: hidden; z-index: 1; }
         .item-title {
             font-weight: bold;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .item-user { font-size: 0.85em; color: #b2bec3; margin-top: 4px; }
-        .item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+        .item-meta { font-size: 0.85em; color: #b2bec3; margin-top: 4px; display: flex; gap: 10px; }
+        .item-actions { display: flex; gap: 6px; flex-shrink: 0; z-index: 1; }
         .item-btn {
             padding: 8px 12px;
             background: #555;
@@ -95,6 +100,44 @@
         .item-btn.play { background: #00b894; }
         .item-btn.remove { background: #d63031; }
         .item-btn.move { background: #0984e3; }
+
+        .progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            background: #00b894;
+            width: 0%;
+            transition: width 0.5s linear;
+            z-index: 2;
+        }
+
+        /* Seek Controls */
+        .seek-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: #2d3436;
+            border-top: 1px solid #444;
+        }
+        .seek-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 6px;
+            background: #555;
+            border-radius: 3px;
+            outline: none;
+        }
+        .seek-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #00b894;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
         .footer {
             background: #3f3f3f;
             padding: 12px 15px;
@@ -122,8 +165,9 @@
             display: flex;
             flex-direction: column;
             height: 100%;
-            /* Make room for the debug console */
-            padding-bottom: 25%;
+            /* Padding bottom will be adjusted by JS when logs are shown */
+            padding-bottom: 0;
+            transition: padding-bottom 0.3s;
         }
 
         /* On-screen Debug Console */
@@ -143,6 +187,7 @@
             padding: 5px;
             border-top: 1px solid #555;
             z-index: 9999;
+            display: none; /* Hidden by default */
         }
         .log-msg {
             margin-bottom: 2px;
@@ -171,11 +216,21 @@
             </div>
             <div class="controls">
                 <button class="btn" id="lockBtn">Unlocked</button>
+                <button class="btn blue" id="resyncBtn">Resync</button>
                 <button class="btn grey" id="prevBtn">&lt;&lt; Prev</button>
                 <button class="btn grey" id="nextBtn">Next &gt;&gt;</button>
+                <button class="btn grey" id="toggleLogBtn">Logs</button>
             </div>
         </div>
         <div class="host-bar" id="hostBar">No host</div>
+
+        <div class="seek-controls" id="seekControls" style="display:none;">
+            <button class="btn grey" onclick="seekBy(-10)">-10s</button>
+            <input type="range" min="0" max="100" value="0" class="seek-slider" id="seekSlider">
+            <button class="btn grey" onclick="seekBy(10)">+10s</button>
+            <span id="seekTimeDisplay" style="color:#ccc; font-size:0.9em; min-width:80px; text-align:right;">0:00 / 0:00</span>
+        </div>
+
         <div class="playlist-container" id="playlist"></div>
         <div class="footer">
             <input type="text" id="urlInput" placeholder="Paste YouTube URL or search term...">
@@ -262,9 +317,13 @@
             index: 0,
             locked: false,
             hostId: "",
-            mode: "playlist"
+            mode: "playlist",
+            startTime: 0,
+            pausedAt: 0,
+            playing: false
         };
         let myUserId = "";
+        let isDraggingSlider = false;
 
         // Parse URL params
         const urlParams = new URLSearchParams(window.location.search);
@@ -279,39 +338,53 @@
 
         document.getElementById('modeLabel').textContent = mode === 'karaoke' ? 'Karaoke Mode' : 'Playlist Mode';
 
-        // Listen for state updates from native script
+        // Listen for state updates from native script (CustomEvent)
         window.addEventListener("bantermessage", (e) => {
             console.log('Received bantermessage:', e);
             handleMessage(e);
         });
 
-        // Listen for state updates from menu browser
+        // Listen for state updates from menu browser (CustomEvent)
         window.addEventListener("bantermenumessage", (e) => {
             console.log('Received bantermenumessage:', e);
             handleMessage(e);
         });
 
+        // Listen for standard window messages (postMessage from in-space browser)
+        window.addEventListener("message", (e) => {
+            handleMessage(e);
+        });
+
         function handleMessage(e) {
-            let messageString;
-            if (typeof e.detail === 'string') {
-                messageString = e.detail;
-            } else if (e.detail && typeof e.detail.message === 'string') {
-                messageString = e.detail.message;
-            } else {
-                console.warn('Received message, but payload is in an unrecognized format.');
-                return;
+            let msgData = null;
+
+            // 1. Try CustomEvent detail (Banter specific)
+            if (e.detail) {
+                if (typeof e.detail === 'string') {
+                    try { msgData = JSON.parse(e.detail); } catch(e){}
+                } else if (e.detail.message && typeof e.detail.message === 'string') {
+                    try { msgData = JSON.parse(e.detail.message); } catch(e){}
+                }
+            }
+            // 2. Try MessageEvent data (Standard postMessage)
+            else if (e.data) {
+                if (typeof e.data === 'string') {
+                    try { msgData = JSON.parse(e.data); } catch(e){}
+                } else if (typeof e.data === 'object') {
+                    msgData = e.data;
+                }
             }
 
-            try {
-                const msg = JSON.parse(messageString);
-                console.info('Parsed message type:', msg.type);
-                if (msg.type === "STATE") {
-                    currentState = msg.data;
-                    console.log('State received, playlist length:', currentState.playlist?.length);
-                    render();
-                }
-            } catch (err) {
-                console.error("Failed to parse message string:", messageString, err);
+            if (!msgData) return;
+
+            // Filter out internal messages or non-app messages
+            if (!msgData.type) return;
+
+            console.info('Parsed message type:', msgData.type);
+            if (msgData.type === "STATE") {
+                currentState = msgData.data;
+                console.log('State received, playlist length:', currentState.playlist?.length);
+                render();
             }
         }
 
@@ -352,11 +425,40 @@
 
         // --- UI ---
         document.getElementById('lockBtn').addEventListener('click', () => send('LOCK'));
+        document.getElementById('resyncBtn').addEventListener('click', () => send('RESYNC'));
         document.getElementById('prevBtn').addEventListener('click', () => send('PREV'));
         document.getElementById('nextBtn').addEventListener('click', () => send('NEXT'));
         document.getElementById('addBtn').addEventListener('click', () => addVideo());
+
+        document.getElementById('toggleLogBtn').addEventListener('click', () => {
+            const el = document.getElementById('log-container');
+            const app = document.querySelector('.app');
+            const isHidden = (el.style.display === 'none' || el.style.display === '');
+
+            if (isHidden) {
+                el.style.display = 'flex';
+                app.style.paddingBottom = '25%';
+            } else {
+                el.style.display = 'none';
+                app.style.paddingBottom = '0';
+            }
+        });
+
         document.getElementById('urlInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') addVideo();
+        });
+
+        // Slider Logic
+        const slider = document.getElementById('seekSlider');
+        slider.addEventListener('mousedown', () => isDraggingSlider = true);
+        slider.addEventListener('mouseup', () => {
+            isDraggingSlider = false;
+            send('SEEK_TO', parseFloat(slider.value));
+        });
+        slider.addEventListener('touchstart', () => isDraggingSlider = true);
+        slider.addEventListener('touchend', () => {
+            isDraggingSlider = false;
+            send('SEEK_TO', parseFloat(slider.value));
         });
 
         function addVideo() {
@@ -371,10 +473,18 @@
         // Expose functions to global scope for inline onclick handlers
         window.playItem = function(index) { send('SET_TRACK', index); }
         window.removeItem = function(index) { send('REMOVE', index); }
+        window.seekBy = function(delta) { send('SEEK_BY', delta); }
         window.moveItem = function(index, delta) {
             const newIndex = index + delta;
             if (newIndex < 0 || newIndex >= currentState.playlist.length) return;
             send('MOVE', { from: index, to: newIndex });
+        }
+
+        function formatTime(seconds) {
+            if (!seconds || isNaN(seconds)) return "0:00";
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
         }
 
         function render() {
@@ -390,19 +500,40 @@
             const hostBar = document.getElementById('hostBar');
             hostBar.textContent = isLocked && currentState.hostId ? 'Locked by host' : (isKaraoke ? 'Karaoke Queue' : 'Open playlist');
 
+            // Show/Hide Seek Controls
+            const seekControls = document.getElementById('seekControls');
+            if (playlist.length > 0) {
+                seekControls.style.display = 'flex';
+                const vid = playlist[currentIndex];
+                if (vid && vid.duration) {
+                    document.getElementById('seekSlider').max = vid.duration;
+                }
+            } else {
+                seekControls.style.display = 'none';
+            }
+
             const container = document.getElementById('playlist');
             if (playlist.length === 0) {
                 container.innerHTML = '<div class="empty-msg">No videos in playlist. Add one below!</div>';
                 return;
             }
 
-            container.innerHTML = playlist.map((vid, idx) => `
-                <div class="item ${idx === currentIndex ? 'active' : ''}">
+            container.innerHTML = playlist.map((vid, idx) => {
+                const isActive = idx === currentIndex;
+                const durationStr = vid.duration ? formatTime(vid.duration) : '--:--';
+
+                return `
+                <div class="item ${isActive ? 'active' : ''}" id="item-${idx}">
+                    ${isActive ? '<div class="progress-bar" id="progressBar"></div>' : ''}
                     <img class="item-thumb" src="https://img.youtube.com/vi/${vid.id}/mqdefault.jpg" 
                          onerror="this.src='https://via.placeholder.com/80x60?text=No+Thumb'">
                     <div class="item-info">
                         <div class="item-title">${escapeHtml(vid.title || 'Untitled')}</div>
-                        <div class="item-user">${isKaraoke ? 'Singer: ' : 'Added by '}${escapeHtml(vid.user || 'Unknown')}</div>
+                        <div class="item-meta">
+                            <span>${isKaraoke ? 'Singer: ' : 'Added by '}${escapeHtml(vid.user || 'Unknown')}</span>
+                            <span>${durationStr}</span>
+                            ${isActive ? '<span id="timeDisplay">0:00</span>' : ''}
+                        </div>
                     </div>
                     <div class="item-actions">
                         ${(!isKaraoke || idx === 0) ? `<button class="item-btn play" onclick="playItem(${idx})">Play</button>` : ''}
@@ -411,7 +542,7 @@
                         <button class="item-btn remove" onclick="removeItem(${idx})">Remove</button>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         function escapeHtml(text) {
@@ -419,6 +550,41 @@
             div.textContent = text || '';
             return div.innerHTML;
         }
+
+        // Progress Bar Loop
+        setInterval(() => {
+            if (!currentState.playlist.length) return;
+
+            const vid = currentState.playlist[currentState.index];
+            if (!vid || !vid.duration) return;
+
+            let elapsed = 0;
+            if (currentState.playing) {
+                elapsed = (Date.now() - currentState.startTime) / 1000;
+            } else {
+                elapsed = currentState.pausedAt || 0;
+            }
+
+            // Clamp elapsed
+            if (elapsed < 0) elapsed = 0;
+            if (elapsed > vid.duration) elapsed = vid.duration;
+
+            const progress = Math.min(100, (elapsed / vid.duration) * 100);
+
+            const bar = document.getElementById('progressBar');
+            const timeDisplay = document.getElementById('timeDisplay');
+            const slider = document.getElementById('seekSlider');
+            const seekTimeDisplay = document.getElementById('seekTimeDisplay');
+
+            if (bar) bar.style.width = `${progress}%`;
+            if (timeDisplay) timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(vid.duration)}`;
+
+            if (seekTimeDisplay) seekTimeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(vid.duration)}`;
+
+            if (slider && !isDraggingSlider) {
+                slider.value = elapsed;
+            }
+        }, 250);
 
         // Initial render and state request
         render();
