@@ -321,27 +321,33 @@
             console.info('Sending command:', type, data);
             const msg = JSON.stringify({ type, data });
 
-            // Try sending via bantermessage (in-world browser)
-            if (window.bantermessage) {
-                try {
-                    window.bantermessage(msg);
-                    return;
-                } catch(e) {
-                    console.error("Error sending bantermessage:", e);
-                }
-            }
+            let sent = false;
 
-            // Try sending via bantermenumessage (menu browser)
-            if (window.bantermenumessage) {
+            // 1. Prefer bantermenumessage if available (Menu Browser)
+            if (typeof window.bantermenumessage === 'function') {
                 try {
                     window.bantermenumessage(msg);
-                    return;
+                    console.log("Sent via bantermenumessage");
+                    sent = true;
                 } catch(e) {
-                    console.error("Error sending bantermenumessage:", e);
+                    console.error("Error sending via bantermenumessage:", e);
                 }
             }
 
-            console.warn("No messaging function available (neither bantermessage nor bantermenumessage)!");
+            // 2. Fallback to bantermessage (In-Space Browser)
+            if (!sent && typeof window.bantermessage === 'function') {
+                try {
+                    window.bantermessage(msg);
+                    console.log("Sent via bantermessage");
+                    sent = true;
+                } catch(e) {
+                    console.error("Error sending via bantermessage:", e);
+                }
+            }
+
+            if (!sent) {
+                console.warn("Failed to send message: No messaging function available.");
+            }
         }
 
         // --- UI ---
