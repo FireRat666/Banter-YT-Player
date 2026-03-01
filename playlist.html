@@ -248,10 +248,10 @@
         console.info("window.bantermessage available:", typeof window.bantermessage === 'function');
         console.info("window.bantermenumessage available:", typeof window.bantermenumessage === 'function');
 
-        // Poll for bantermessage availability in case it is injected late
+        // Poll for messaging availability
         const banterCheckInterval = setInterval(() => {
-            if (typeof window.bantermessage === 'function') {
-                console.info("window.bantermessage became available asynchronously!");
+            if (typeof window.bantermessage === 'function' || typeof window.bantermenumessage === 'function') {
+                console.info("Messaging API became available asynchronously!");
                 clearInterval(banterCheckInterval);
             }
         }, 500);
@@ -284,11 +284,11 @@
             handleMessage(e);
         });
 
-        // // Listen for state updates from menu browser
-        // window.addEventListener("bantermenumessage", (e) => {
-        //     console.log('Received bantermenumessage:', e);
-        //     handleMessage(e);
-        // });
+        // Listen for state updates from menu browser
+        window.addEventListener("bantermenumessage", (e) => {
+            console.log('Received bantermenumessage:', e);
+            handleMessage(e);
+        });
 
         function handleMessage(e) {
             let messageString;
