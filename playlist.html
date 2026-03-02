@@ -205,6 +205,22 @@
         .log-msg.info { color: #8bf; }
         .log-msg.warn { background-color: #ffc107; color: #000; font-weight: bold; }
         .log-msg.error { background-color: #dc3545; color: #fff; font-weight: bold; }
+
+        #copyLogsBtn {
+            position: fixed;
+            bottom: 25%; /* Aligned with top of log container */
+            right: 10px;
+            z-index: 10000;
+            padding: 4px 8px;
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            font-size: 12px;
+            display: none; /* Hidden by default */
+        }
+        #copyLogsBtn:hover { background: #555; }
     </style>
 </head>
 <body>
@@ -238,6 +254,7 @@
         </div>
     </div>
 
+    <button id="copyLogsBtn">Copy Logs</button>
     <div id="log-container"></div>
 
     <script>
@@ -430,18 +447,38 @@
         document.getElementById('nextBtn').addEventListener('click', () => send('NEXT'));
         document.getElementById('addBtn').addEventListener('click', () => addVideo());
 
-        document.getElementById('toggleLogBtn').addEventListener('click', () => {
+        const toggleLogBtn = document.getElementById('toggleLogBtn');
+        const copyLogsBtn = document.getElementById('copyLogsBtn');
+
+        toggleLogBtn.addEventListener('click', () => {
             const el = document.getElementById('log-container');
             const app = document.querySelector('.app');
             const isHidden = (el.style.display === 'none' || el.style.display === '');
 
             if (isHidden) {
                 el.style.display = 'flex';
+                copyLogsBtn.style.display = 'block';
                 app.style.paddingBottom = '25%';
             } else {
                 el.style.display = 'none';
+                copyLogsBtn.style.display = 'none';
                 app.style.paddingBottom = '0';
             }
+        });
+
+        copyLogsBtn.addEventListener('click', () => {
+            const logs = Array.from(logContainer.children)
+                .reverse() // DOM is reversed, so reverse back to chronological
+                .map(div => div.textContent)
+                .join('\n');
+
+            navigator.clipboard.writeText(logs).then(() => {
+                const originalText = copyLogsBtn.textContent;
+                copyLogsBtn.textContent = 'Copied!';
+                setTimeout(() => copyLogsBtn.textContent = originalText, 2000);
+            }).catch(err => {
+                console.error('Failed to copy logs:', err);
+            });
         });
 
         document.getElementById('urlInput').addEventListener('keypress', (e) => {
@@ -461,10 +498,43 @@
             send('SEEK_TO', parseFloat(slider.value));
         });
 
-        function addVideo() {
+        async function addVideo() {
             const input = document.getElementById('urlInput');
             const value = input.value.trim();
-            if (value) {
+            if (!value) return;
+
+            // Check if it's a URL or ID
+            let id = null;
+            try {
+                const urlObj = new URL(value);
+                if (urlObj.hostname.includes("youtube.com")) id = urlObj.searchParams.get("v");
+                else if (urlObj.hostname.includes("youtu.be")) id = urlObj.pathname.slice(1);
+            } catch (e) {}
+
+            // If not a URL, treat as search query
+            if (!id && !value.match(/^[a-zA-Z0-9_-]{11}$/)) {
+                console.log("Searching for:", value);
+                try {
+                    // Use your CORS proxy
+                    const response = await fetch(`https://cors-netlify-proxy.netlify.app/.netlify/functions/proxy/search?pool=banter&input=${encodeURIComponent(value)}`);
+                    const data = await response.json();
+
+                    if (data && data.results && data.results.length > 0) {
+                        // Find first video result
+                        const video = data.results[0];
+                        if (video) {
+                            console.log("Found video:", video.title, video.id);
+                            send('ADD', { id: video.id, title: video.title });
+                            input.value = '';
+                            return;
+                        }
+                    }
+                    console.warn("No video results found.");
+                } catch (err) {
+                    console.error("Search failed:", err);
+                }
+            } else {
+                // It's a URL or ID
                 send('ADD', value);
                 input.value = '';
             }

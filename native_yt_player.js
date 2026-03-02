@@ -482,15 +482,24 @@
         }
 
         async function resolveAndAdd(input) {
-            let id = input;
-            try {
-                const urlObj = new URL(input);
-                if (urlObj.hostname.includes("youtube.com")) id = urlObj.searchParams.get("v");
-                else if (urlObj.hostname.includes("youtu.be")) id = urlObj.pathname.slice(1);
-            } catch (e) { }
+            let id = "";
+            let title = "";
+
+            if (typeof input === 'object') {
+                id = input.id;
+                title = input.title;
+            } else {
+                id = input;
+                try {
+                    const urlObj = new URL(input);
+                    if (urlObj.hostname.includes("youtube.com")) id = urlObj.searchParams.get("v");
+                    else if (urlObj.hostname.includes("youtu.be")) id = urlObj.pathname.slice(1);
+                } catch (e) { }
+                title = "Video " + id;
+            }
+
             if (!id) return;
 
-            const title = "Video " + id;
             const current = getCombinedState();
             const list = [...current.playlist, { title: title, id: id, user: scene.localUser.name }];
             updateState({ playlist: list });
