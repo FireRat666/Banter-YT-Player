@@ -100,7 +100,19 @@
             text-overflow: ellipsis;
         }
         .item-meta { font-size: 0.85em; color: #b2bec3; margin-top: 4px; display: flex; gap: 10px; }
+        .item-description {
+            font-size: 0.8em;
+            color: #ccc;
+            margin-top: 5px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2; /* Show 2 lines */
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: normal;
+        }
         .item-actions { display: flex; gap: 6px; flex-shrink: 0; z-index: 1; }
+        .item-actions.vertical { flex-direction: column; gap: 4px; }
         .item-btn {
             padding: 8px 12px;
             background: #555;
@@ -287,6 +299,7 @@
         </div>
 
         <div class="footer">
+            <button class="btn grey" id="historyBtn" title="Recent Searches">History</button>
             <input type="text" id="urlInput" placeholder="Paste YouTube URL or search term...">
             <button class="btn" id="addBtn">Add</button>
         </div>
@@ -447,7 +460,8 @@
         function send(type, data) {
             if (data === undefined) data = null;
             console.info('Sending command:', type, data);
-            const msg = JSON.stringify({ type, data });
+            const msgId = `msg_${Date.now()}_${Math.random()}`;
+            const msg = JSON.stringify({ type, data, msgId });
 
             let sent = false;
 
@@ -484,6 +498,7 @@
         document.getElementById('prevBtn').addEventListener('click', () => send('PREV'));
         document.getElementById('nextBtn').addEventListener('click', () => send('NEXT'));
         document.getElementById('addBtn').addEventListener('click', () => addVideo());
+        document.getElementById('historyBtn').addEventListener('click', showRecentSearches);
 
         const toggleLogBtn = document.getElementById('toggleLogBtn');
         const copyLogsBtn = document.getElementById('copyLogsBtn');
@@ -537,14 +552,77 @@
         });
 
         // --- Search Logic ---
+        const SEARCH_CACHE_KEY = 'banter_search_cache';
+        const MAX_CACHED_SEARCHES = 20;
+
+        function getSearchCache() {
+            try {
+                return JSON.parse(localStorage.getItem(SEARCH_CACHE_KEY) || '{}');
+            } catch (e) {
+                console.error("Error parsing search cache from localStorage:", e);
+                return {};
+            }
+        }
+
+        function saveToSearchCache(query, results) {
+            const cache = getSearchCache();
+            cache[query] = { timestamp: Date.now(), results: results };
+
+            // Prune old entries if needed
+            const sortedKeys = Object.keys(cache).sort((a, b) => cache[a].timestamp - cache[b].timestamp);
+            while (sortedKeys.length > MAX_CACHED_SEARCHES) {
+                delete cache[sortedKeys.shift()]; // Remove the oldest entry
+            }
+
+            try {
+                localStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify(cache));
+            } catch (e) {
+                console.error("Error saving search cache to localStorage:", e);
+            }
+        }
+
+        function showRecentSearches() {
+            const cache = getSearchCache();
+            const sortedQueries = Object.keys(cache).sort((a, b) => cache[b].timestamp - cache[a].timestamp); // Newest first
+
+            const list = document.getElementById('resultsList');
+            if (sortedQueries.length === 0) {
+                list.innerHTML = '<div class="empty-msg">No recent searches.</div>';
+            } else {
+                list.innerHTML = sortedQueries.map(q => `
+                    <div class="item" onclick="loadCachedSearch('${escapeHtml(q).replace(/'/g, "\\'")}')" style="cursor:pointer;">
+                        <div class="item-info">
+                            <div class="item-title">${escapeHtml(q)}</div>
+                            <div class="item-meta">Cached Result</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            document.getElementById('playlist').style.display = 'none';
+            document.getElementById('searchResults').style.display = 'block';
+        }
+
+        window.loadCachedSearch = function(query) {
+            const cache = getSearchCache();
+            if (cache[query]) {
+                renderSearchResults(cache[query].results);
+            }
+        }
+
         window.closeSearch = function() {
             document.getElementById('searchResults').style.display = 'none';
             document.getElementById('playlist').style.display = 'block';
             document.getElementById('urlInput').value = '';
         }
 
-        window.addSearchResult = function(id, title) {
-            send('ADD', { id, title });
+        // Store current search results to avoid passing complex JSON in HTML attributes
+        let currentSearchResults = [];
+
+        window.addSearchResultFromIndex = function(index, mode) {
+            const vid = currentSearchResults[index];
+            if (!vid) return;
+            const duration = parseDuration(vid.lengthText);
+            send('ADD', { id: vid.id, title: vid.title, duration: duration, mode: mode });
             closeSearch();
         }
 
@@ -565,6 +643,14 @@
             if (!id && !value.match(/^[a-zA-Z0-9_-]{11}$/)) {
                 console.log("Searching for:", value);
 
+                // Check cache first
+                const cache = getSearchCache();
+                if (cache[value]) {
+                    console.log("Using cached results for:", value);
+                    renderSearchResults(cache[value].results);
+                    return;
+                }
+
                 // Show loading
                 document.getElementById('loadingOverlay').style.display = 'flex';
 
@@ -572,7 +658,7 @@
                     // Use your CORS proxy with the generic ?url= parameter
                     // Target: api.u2b.cx
                     const targetUrl = `https://api.u2b.cx/search?pool=banter&input=${encodeURIComponent(value)}`;
-                    const proxyUrl = `https://cors-netlify-proxy.netlify.app/.netlify/functions/proxy?url=${encodeURIComponent(targetUrl)}`;
+                    const proxyUrl = `https://fire-cors-proxy.netlify.app/.netlify/functions/proxy?url=${encodeURIComponent(targetUrl)}`;
 
                     // Add timeout to fetch
                     const controller = new AbortController();
@@ -584,33 +670,47 @@
                     if (!response.ok) {
                         const text = await response.text();
                         console.error(`Proxy error: ${response.status} ${response.statusText}`, text);
-                        // Don't alert, just log
+                        console.error("Full response body:", text); // Log body for debugging
                     } else {
                         const data = await response.json();
 
                         // u2b.cx returns { results: [...] }
                         if (data && data.results && data.results.length > 0) {
+                            saveToSearchCache(value, data.results);
                             renderSearchResults(data.results);
                         } else {
                             console.warn("No video results found.");
                         }
                     }
                 } catch (err) {
-                    console.error("Search failed:", err);
+                    console.error("Search failed:", err.name, err.message);
+                    if (err.stack) console.error(err.stack);
                 } finally {
                     // Hide loading
                     document.getElementById('loadingOverlay').style.display = 'none';
                 }
             } else {
                 // It's a URL or ID
-                send('ADD', value);
+                // For direct URL/ID adds, we don't have duration yet, so send as is.
+                // The backend will likely fetch metadata including duration.
+                send('ADD', { id: id || value, mode: 'append' });
                 input.value = '';
             }
         }
 
+        function parseDuration(str) {
+            if (!str) return 0;
+            const parts = str.split(':').map(Number);
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            return 0;
+        }
+
         function renderSearchResults(results) {
+            currentSearchResults = results; // Save results for index-based access
             const list = document.getElementById('resultsList');
-            list.innerHTML = results.map(vid => `
+            list.innerHTML = results.map((vid, index) => {
+                return `
                 <div class="item">
                     <img class="item-thumb" src="https://img.youtube.com/vi/${vid.id}/mqdefault.jpg"
                          onerror="this.src='https://via.placeholder.com/80x60?text=No+Thumb'">
@@ -620,12 +720,15 @@
                             <span>${escapeHtml(vid.channel?.name || 'Unknown')}</span>
                             <span>${vid.lengthText || ''}</span>
                         </div>
+                        <div class="item-description">${escapeHtml(vid.description || '')}</div>
                     </div>
-                    <div class="item-actions">
-                        <button class="item-btn add" onclick="addSearchResult('${vid.id}', '${escapeHtml(vid.title).replace(/'/g, "\\'")}')">Add</button>
+                    <div class="item-actions vertical">
+                        <button class="item-btn add" onclick='addSearchResultFromIndex(${index}, "now")'>Play Now</button>
+                        <button class="item-btn move" onclick='addSearchResultFromIndex(${index}, "next")'>Play Next</button>
+                        <button class="item-btn" onclick='addSearchResultFromIndex(${index}, "append")'>Add to Playlist</button>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
 
             document.getElementById('playlist').style.display = 'none';
             document.getElementById('searchResults').style.display = 'block';
@@ -686,7 +789,7 @@
                 return `
                 <div class="item ${isActive ? 'active' : ''}" id="item-${idx}">
                     ${isActive ? '<div class="progress-bar" id="progressBar"></div>' : ''}
-                    <img class="item-thumb" src="https://img.youtube.com/vi/${vid.id}/mqdefault.jpg" 
+                    <img class="item-thumb" src="https://img.youtube.com/vi/${vid.id}/mqdefault.jpg"
                          onerror="this.src='https://via.placeholder.com/80x60?text=No+Thumb'">
                     <div class="item-info">
                         <div class="item-title">${escapeHtml(vid.title || 'Untitled')}</div>
@@ -704,52 +807,52 @@
                     </div>
                 </div>
             `}).join('');
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
+    // Progress Bar Loop
+    setInterval(() => {
+        if (!currentState.playlist.length) return;
+
+        const vid = currentState.playlist[currentState.index];
+        if (!vid || !vid.duration) return;
+
+        let elapsed = 0;
+        if (currentState.playing) {
+            elapsed = (Date.now() - currentState.startTime) / 1000;
+        } else {
+            elapsed = currentState.pausedAt || 0;
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text || '';
-            return div.innerHTML;
+        // Clamp elapsed
+        if (elapsed < 0) elapsed = 0;
+        if (elapsed > vid.duration) elapsed = vid.duration;
+
+        const progress = Math.min(100, (elapsed / vid.duration) * 100);
+
+        const bar = document.getElementById('progressBar');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const slider = document.getElementById('seekSlider');
+        const seekTimeDisplay = document.getElementById('seekTimeDisplay');
+
+        if (bar) bar.style.width = `${progress}%`;
+        if (timeDisplay) timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(vid.duration)}`;
+
+        if (seekTimeDisplay) seekTimeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(vid.duration)}`;
+
+        if (slider && !isDraggingSlider) {
+            slider.value = elapsed;
         }
+    }, 250);
 
-        // Progress Bar Loop
-        setInterval(() => {
-            if (!currentState.playlist.length) return;
-
-            const vid = currentState.playlist[currentState.index];
-            if (!vid || !vid.duration) return;
-
-            let elapsed = 0;
-            if (currentState.playing) {
-                elapsed = (Date.now() - currentState.startTime) / 1000;
-            } else {
-                elapsed = currentState.pausedAt || 0;
-            }
-
-            // Clamp elapsed
-            if (elapsed < 0) elapsed = 0;
-            if (elapsed > vid.duration) elapsed = vid.duration;
-
-            const progress = Math.min(100, (elapsed / vid.duration) * 100);
-
-            const bar = document.getElementById('progressBar');
-            const timeDisplay = document.getElementById('timeDisplay');
-            const slider = document.getElementById('seekSlider');
-            const seekTimeDisplay = document.getElementById('seekTimeDisplay');
-
-            if (bar) bar.style.width = `${progress}%`;
-            if (timeDisplay) timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(vid.duration)}`;
-
-            if (seekTimeDisplay) seekTimeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(vid.duration)}`;
-
-            if (slider && !isDraggingSlider) {
-                slider.value = elapsed;
-            }
-        }, 250);
-
-        // Initial render and state request
-        render();
-        send('REQUEST_STATE');
-    </script>
+    // Initial render and state request
+    render();
+    send('REQUEST_STATE');
+</script>
 </body>
 </html>

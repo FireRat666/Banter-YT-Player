@@ -25,6 +25,7 @@
 
     // --- Init Game ---
     function initGame() {
+        console.log("[NativeYT] initGame() Called.");
         if (window.nativePlayerGameInitialized) return;
         window.nativePlayerGameInitialized = true;
 
@@ -81,6 +82,15 @@
             volume: CONFIG.volume,
             muted: false
         };
+
+        // --- Message De-duplication ---
+        const processedMessages = new Set();
+        // Cleanup old messages periodically
+        setInterval(() => {
+            if (processedMessages.size > 1000) {
+                processedMessages.clear();
+            }
+        }, 60000);
 
         // --- Init ---
         async function init() {
@@ -277,6 +287,15 @@
                 if (msg.type === 'LOG') {
                     console.log(msg.data);
                     return;
+                }
+
+                // Check for duplicate messages
+                if (msg.msgId) {
+                    if (processedMessages.has(msg.msgId)) {
+                        console.log(`[NativeYT] Ignoring duplicate message: ${msg.msgId}`);
+                        return;
+                    }
+                    processedMessages.add(msg.msgId);
                 }
 
                 if (["VOL_UP", "VOL_DOWN", "MUTE"].includes(msg.type)) {
@@ -482,27 +501,63 @@
         }
 
         async function resolveAndAdd(input) {
-            let id = "";
-            let title = "";
+            let newItem = {
+                id: "",
+                title: "",
+                duration: 0,
+                user: scene.localUser.name
+            };
+            let mode = 'append';
 
-            if (typeof input === 'object') {
-                id = input.id;
-                title = input.title;
+            if (typeof input === 'object' && input !== null) {
+                newItem.id = input.id;
+                newItem.title = input.title || `Video ${input.id}`;
+                newItem.duration = input.duration || 0;
+                mode = input.mode || 'append';
             } else {
-                id = input;
+                newItem.id = input;
                 try {
                     const urlObj = new URL(input);
-                    if (urlObj.hostname.includes("youtube.com")) id = urlObj.searchParams.get("v");
-                    else if (urlObj.hostname.includes("youtu.be")) id = urlObj.pathname.slice(1);
-                } catch (e) { }
-                title = "Video " + id;
+                    if (urlObj.hostname.includes("youtube.com")) newItem.id = urlObj.searchParams.get("v");
+                    else if (urlObj.hostname.includes("youtu.be")) newItem.id = urlObj.pathname.slice(1);
+                } catch (e) {}
+                newItem.title = `Video ${newItem.id}`;
             }
 
-            if (!id) return;
+            if (!newItem.id) {
+                console.warn("[NativeYT] resolveAndAdd called with invalid input:", input);
+                return;
+            }
 
             const current = getCombinedState();
-            const list = [...current.playlist, { title: title, id: id, user: scene.localUser.name }];
-            updateState({ playlist: list });
+            const list = [...current.playlist];
+
+            switch (mode) {
+                case 'now': {
+                    const newIndex = current.playlist.length === 0 ? 0 : current.index + 1;
+                    list.splice(newIndex, 0, newItem);
+                    updateState({
+                        playlist: list,
+                        index: newIndex,
+                        startTime: Date.now(),
+                        pausedAt: 0,
+                        playing: true
+                    });
+                    break;
+                }
+                case 'next': {
+                    const newIndex = current.playlist.length === 0 ? 0 : current.index + 1;
+                    list.splice(newIndex, 0, newItem);
+                    updateState({ playlist: list });
+                    break;
+                }
+                case 'append':
+                default: {
+                    list.push(newItem);
+                    updateState({ playlist: list });
+                    break;
+                }
+            }
         }
 
         function updateTrack(delta) {
@@ -587,10 +642,24 @@
         init().catch(e => console.error(e));
     }
 
+    // --- Console Interception ---
+    const originalLog = console.log;
+    console.log = function(...args) {
+        originalLog.apply(console, args);
+        // Check if the first argument is the string we are looking for
+        if (args.length > 0 && typeof args[0] === 'string' && args[0].includes("Unity Scene Loaded.")) {
+            originalLog("[NativeYT] Detected 'Unity Scene Loaded.' via console interception.");
+            initGame();
+        }
+    };
+
     if (window.BS) {
+        console.log("[NativeYT] Window.BS True");
         initGame();
     } else {
+        console.log("[NativeYT] Window.BS False");
         window.addEventListener("unity-loaded", initGame);
-        window.addEventListener("bs-loaded", initGame);
+        // window.addEventListener("bs-loaded", initGame);
     }
+    console.log("[NativeYT] Script End");
 })();
