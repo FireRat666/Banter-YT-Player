@@ -51,12 +51,26 @@
         .btn.locked { background: #27ae60; }
         .btn.blue { background: #0984e3; }
 
-        .playlist-container {
+        .playlist-container, .search-results-container {
             flex: 1;
             overflow-y: auto;
             background: linear-gradient(to right, #1e181f, #2b313e);
             padding: 10px;
         }
+        .search-results-container {
+            display: none; /* Hidden by default */
+            background: #2b313e;
+        }
+        .search-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #333;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
         .item {
             display: flex;
             align-items: center;
@@ -100,6 +114,7 @@
         .item-btn.play { background: #00b894; }
         .item-btn.remove { background: #d63031; }
         .item-btn.move { background: #0984e3; }
+        .item-btn.add { background: #00b894; }
 
         .progress-bar {
             position: absolute;
@@ -221,9 +236,23 @@
             display: none; /* Hidden by default */
         }
         #copyLogsBtn:hover { background: #555; }
+
+        /* Loading Overlay */
+        #loadingOverlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 20000;
+            color: white;
+            font-size: 1.5em;
+        }
     </style>
 </head>
 <body>
+    <div id="loadingOverlay">Searching...</div>
     <div class="app">
         <div class="header">
             <div style="display: flex; align-items: baseline;">
@@ -248,6 +277,15 @@
         </div>
 
         <div class="playlist-container" id="playlist"></div>
+
+        <div class="search-results-container" id="searchResults">
+            <div class="search-header">
+                <span>Search Results</span>
+                <button class="btn grey" onclick="closeSearch()">Cancel</button>
+            </div>
+            <div id="resultsList"></div>
+        </div>
+
         <div class="footer">
             <input type="text" id="urlInput" placeholder="Paste YouTube URL or search term...">
             <button class="btn" id="addBtn">Add</button>
@@ -284,7 +322,7 @@
             const logElement = document.createElement('div');
             logElement.className = `log-msg ${level}`;
             logElement.textContent = message;
-            
+
             // Insert at the top
             logContainer.insertBefore(logElement, logContainer.firstChild);
 
@@ -292,7 +330,7 @@
             while (logContainer.children.length > MAX_LOG_ENTRIES) {
                 logContainer.removeChild(logContainer.lastChild);
             }
-            
+
             // 4. Also send to native console
             const logFn = originalConsole[level] || originalConsole.log;
             logFn.apply(console, args);
@@ -350,7 +388,7 @@
         }
         const instanceId = urlParams.get('instance') || 'default-room';
         const mode = urlParams.get('mode') || 'playlist';
-        
+
         console.info('URL params - instance:', instanceId, 'mode:', mode, 'user:', myUserId);
 
         document.getElementById('modeLabel').textContent = mode === 'karaoke' ? 'Karaoke Mode' : 'Playlist Mode';
@@ -498,6 +536,18 @@
             send('SEEK_TO', parseFloat(slider.value));
         });
 
+        // --- Search Logic ---
+        window.closeSearch = function() {
+            document.getElementById('searchResults').style.display = 'none';
+            document.getElementById('playlist').style.display = 'block';
+            document.getElementById('urlInput').value = '';
+        }
+
+        window.addSearchResult = function(id, title) {
+            send('ADD', { id, title });
+            closeSearch();
+        }
+
         async function addVideo() {
             const input = document.getElementById('urlInput');
             const value = input.value.trim();
@@ -514,30 +564,71 @@
             // If not a URL, treat as search query
             if (!id && !value.match(/^[a-zA-Z0-9_-]{11}$/)) {
                 console.log("Searching for:", value);
-                try {
-                    // Use your CORS proxy
-                    const response = await fetch(`https://cors-netlify-proxy.netlify.app/.netlify/functions/proxy/search?pool=banter&input=${encodeURIComponent(value)}`);
-                    const data = await response.json();
 
-                    if (data && data.results && data.results.length > 0) {
-                        // Find first video result
-                        const video = data.results[0];
-                        if (video) {
-                            console.log("Found video:", video.title, video.id);
-                            send('ADD', { id: video.id, title: video.title });
-                            input.value = '';
-                            return;
+                // Show loading
+                document.getElementById('loadingOverlay').style.display = 'flex';
+
+                try {
+                    // Use your CORS proxy with the generic ?url= parameter
+                    // Target: api.u2b.cx
+                    const targetUrl = `https://api.u2b.cx/search?pool=banter&input=${encodeURIComponent(value)}`;
+                    const proxyUrl = `https://cors-netlify-proxy.netlify.app/.netlify/functions/proxy?url=${encodeURIComponent(targetUrl)}`;
+
+                    // Add timeout to fetch
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+                    const response = await fetch(proxyUrl, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        console.error(`Proxy error: ${response.status} ${response.statusText}`, text);
+                        // Don't alert, just log
+                    } else {
+                        const data = await response.json();
+
+                        // u2b.cx returns { results: [...] }
+                        if (data && data.results && data.results.length > 0) {
+                            renderSearchResults(data.results);
+                        } else {
+                            console.warn("No video results found.");
                         }
                     }
-                    console.warn("No video results found.");
                 } catch (err) {
                     console.error("Search failed:", err);
+                } finally {
+                    // Hide loading
+                    document.getElementById('loadingOverlay').style.display = 'none';
                 }
             } else {
                 // It's a URL or ID
                 send('ADD', value);
                 input.value = '';
             }
+        }
+
+        function renderSearchResults(results) {
+            const list = document.getElementById('resultsList');
+            list.innerHTML = results.map(vid => `
+                <div class="item">
+                    <img class="item-thumb" src="https://img.youtube.com/vi/${vid.id}/mqdefault.jpg"
+                         onerror="this.src='https://via.placeholder.com/80x60?text=No+Thumb'">
+                    <div class="item-info">
+                        <div class="item-title">${escapeHtml(vid.title)}</div>
+                        <div class="item-meta">
+                            <span>${escapeHtml(vid.channel?.name || 'Unknown')}</span>
+                            <span>${vid.lengthText || ''}</span>
+                        </div>
+                    </div>
+                    <div class="item-actions">
+                        <button class="item-btn add" onclick="addSearchResult('${vid.id}', '${escapeHtml(vid.title).replace(/'/g, "\\'")}')">Add</button>
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('playlist').style.display = 'none';
+            document.getElementById('searchResults').style.display = 'block';
         }
 
         // Expose functions to global scope for inline onclick handlers
