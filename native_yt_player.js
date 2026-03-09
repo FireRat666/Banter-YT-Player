@@ -87,10 +87,14 @@
         const processedMessages = new Set();
         // Cleanup old messages periodically
         setInterval(() => {
-            if (processedMessages.size > 1000) {
-                processedMessages.clear();
+            const now = Date.now();
+            for (const id of processedMessages) {
+                const timestamp = parseInt(id.split('_')[1]);
+                if (now - timestamp > 30000) { // 30 second expiry
+                    processedMessages.delete(id);
+                }
             }
-        }, 60000);
+        }, 30000);
 
         // --- Init ---
         async function init() {
@@ -124,11 +128,8 @@
             screenObj.On("browser-message", handlePlayerMessage);
             console.log("[NativeYT] Listening for 'browser-message' on screenObj");
 
-            // Listen for messages from the Menu Browser
-            scene.On("menu-browser-message", (e) => {
-                console.log("[NativeYT] Raw menu-browser-message received:", e.detail);
-                handleUiMessage(e);
-            });
+            // Centralized listener for UI messages
+            scene.On("menu-browser-message", (e) => processUiMessage(e.detail, "menu-browser"));
             console.log("[NativeYT] Listening for 'menu-browser-message' on scene");
 
             scene.On("space-state-changed", onStateChange);
@@ -153,10 +154,7 @@
             inSpacePlaylistBrowserComponent.ToggleInteraction(true);
 
             // Listen for messages specifically from this browser
-            inSpacePlaylistBrowserGo.On("browser-message", (e) => {
-                console.log("[NativeYT] Received message from in-space playlist:", e.detail);
-                handleUiMessage(e);
-            });
+            inSpacePlaylistBrowserGo.On("browser-message", (e) => processUiMessage(e.detail, "in-space-browser"));
         }
 
         async function createButtons() {
@@ -248,7 +246,8 @@
                 if (type === "MUTE") localState.muted = !localState.muted;
                 updateVolume();
             } else {
-                handleUiMessage({ detail: JSON.stringify({ type, data }) });
+                // For actions triggered by in-world buttons, we don't have a message ID, so we pass null.
+                processUiMessage(JSON.stringify({ type, data }), "in-world-button");
             }
         }
 
@@ -270,15 +269,16 @@
             }
         }
 
-        async function handleUiMessage(e) {
+        async function processUiMessage(detail, source) {
             let msgString;
             try {
-                if (typeof e.detail === 'string') {
-                    msgString = e.detail;
-                } else if (e.detail && typeof e.detail.message === 'string') {
-                    msgString = e.detail.message;
+                // Unify message format
+                if (typeof detail === 'string') {
+                    msgString = detail;
+                } else if (detail && typeof detail.message === 'string') {
+                    msgString = detail.message;
                 } else {
-                    console.warn("[NativeYT] UI message received, but payload is in an unrecognized format:", e.detail);
+                    console.warn(`[NativeYT] UI message from ${source} received, but payload is in an unrecognized format:`, detail);
                     return;
                 }
 
@@ -292,19 +292,13 @@
                 // Check for duplicate messages
                 if (msg.msgId) {
                     if (processedMessages.has(msg.msgId)) {
-                        console.log(`[NativeYT] Ignoring duplicate message: ${msg.msgId}`);
+                        console.log(`[NativeYT] Ignoring duplicate message from ${source}: ${msg.msgId}`);
                         return;
                     }
                     processedMessages.add(msg.msgId);
                 }
 
-                if (["VOL_UP", "VOL_DOWN", "MUTE"].includes(msg.type)) {
-                    if (msg.type === "VOL_UP") localState.volume = Math.min(100, localState.volume + 10);
-                    if (msg.type === "VOL_DOWN") localState.volume = Math.max(0, localState.volume - 10);
-                    if (msg.type === "MUTE") localState.muted = !localState.muted;
-                    updateVolume();
-                    return;
-                }
+                console.log(`[NativeYT] Processing command from ${source}:`, msg.type, msg.data || '');
 
                 const current = getCombinedState();
                 const myId = scene.localUser.uid;
@@ -335,11 +329,9 @@
                         const newPlaying = !current.playing;
                         let updates = { playing: newPlaying };
                         if (newPlaying) {
-                            // Resume: calculate new startTime based on pausedAt
                             const offset = (current.pausedAt || 0) * 1000;
                             updates.startTime = Date.now() - offset;
                         } else {
-                            // Pause: save current elapsed time
                             const elapsed = (Date.now() - current.startTime) / 1000;
                             updates.pausedAt = elapsed;
                         }
@@ -366,19 +358,16 @@
                         if (from >= 0 && from < list.length && to >= 0 && to < list.length) {
                             const [item] = list.splice(from, 1);
                             list.splice(to, 0, item);
-
-                            // Adjust current index if needed
                             let newIdx = current.index;
                             if (current.index === from) newIdx = to;
                             else if (current.index > from && current.index <= to) newIdx--;
                             else if (current.index < from && current.index >= to) newIdx++;
-
                             updateState({ playlist: list, index: newIdx });
                         }
                     },
                     "ADD": async () => await resolveAndAdd(msg.data),
                     "SEEK_BY": () => {
-                        const delta = msg.data; // seconds
+                        const delta = msg.data;
                         let updates = {};
                         if (current.playing) {
                             const currentElapsed = (Date.now() - current.startTime) / 1000;
@@ -391,7 +380,7 @@
                         updateState(updates);
                     },
                     "SEEK_TO": () => {
-                        const target = msg.data; // seconds
+                        const target = msg.data;
                         let updates = {};
                         if (current.playing) {
                             updates.startTime = Date.now() - (target * 1000);
@@ -403,7 +392,10 @@
                 };
 
                 if (actions[msg.type]) {
-                    if (current.locked && current.hostId !== myId) return;
+                    if (current.locked && current.hostId !== myId) {
+                        console.log(`[NativeYT] Action '${msg.type}' blocked by lock.`);
+                        return;
+                    }
                     await actions[msg.type]();
                 }
             } catch (err) {
@@ -440,7 +432,6 @@
                 }
 
                 if (msg.type === 'VIDEO_INFO') {
-                    // Update state with duration and title
                     const current = getCombinedState();
                     const list = [...current.playlist];
                     if (list[current.index]) {
@@ -457,7 +448,6 @@
                     }
                 } else if (msg.type === 'VIDEO_ENDED') {
                     const current = getCombinedState();
-                    // Only the host should trigger next if locked
                     if (current.locked && current.hostId !== scene.localUser.uid) return;
                     handleAction('NEXT');
                 } else if (msg.type === 'PLAYER_STATUS') {
@@ -476,13 +466,10 @@
             if (!vid || !vid.duration) return;
 
             const elapsed = (Date.now() - current.startTime) / 1000;
-            // If we are 5 seconds past the duration, force next
             if (elapsed > vid.duration + 5) {
-                // Only host or someone responsible
                 if (current.locked) {
                     if (current.hostId === scene.localUser.uid) handleAction('NEXT');
                 } else {
-                    // If unlocked, we rely on the first client to trigger it.
                     handleAction('NEXT');
                 }
             }

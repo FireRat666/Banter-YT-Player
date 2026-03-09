@@ -581,6 +581,19 @@
             }
         }
 
+        window.removeCachedSearch = function(query) {
+            const cache = getSearchCache();
+            if (cache[query]) {
+                delete cache[query];
+                try {
+                    localStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify(cache));
+                    showRecentSearches(); // Refresh the list
+                } catch (e) {
+                    console.error("Error removing cached search:", e);
+                }
+            }
+        }
+
         function showRecentSearches() {
             const cache = getSearchCache();
             const sortedQueries = Object.keys(cache).sort((a, b) => cache[b].timestamp - cache[a].timestamp); // Newest first
@@ -590,10 +603,13 @@
                 list.innerHTML = '<div class="empty-msg">No recent searches.</div>';
             } else {
                 list.innerHTML = sortedQueries.map(q => `
-                    <div class="item" onclick="loadCachedSearch('${escapeHtml(q).replace(/'/g, "\\'")}')" style="cursor:pointer;">
-                        <div class="item-info">
+                    <div class="item">
+                        <div class="item-info" onclick="loadCachedSearch('${escapeHtml(q).replace(/'/g, "\\'")}')" style="cursor:pointer;">
                             <div class="item-title">${escapeHtml(q)}</div>
                             <div class="item-meta">Cached Result</div>
+                        </div>
+                        <div class="item-actions">
+                            <button class="item-btn remove" onclick="removeCachedSearch('${escapeHtml(q).replace(/'/g, "\\'")}')">X</button>
                         </div>
                     </div>
                 `).join('');
