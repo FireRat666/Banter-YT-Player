@@ -16,7 +16,7 @@ Add the script tag inside your `<a-scene>` in your space's `index.html`.
 
 ```html
 <!-- Native YouTube Player -->
-<script src="https://tube.webslop.ai/player.js" 
+<script src="https://banter-yt-player.firer.at/player.js" 
     instance="main-screen"
     position="0 1.5 4" 
     rotation="0 0 0" 
@@ -31,7 +31,7 @@ Add the script tag inside your `<a-scene>` in your space's `index.html`.
 ### Self-Hosting (Optional)
 If you wish to host the player files yourself:
 1. Download `player.js`, `playlist.html`, `youtube_player.html`, and the `assets/` folder.
-2. Edit `player.js` and change `const HOST_URL = "tube.webslop.ai";` to your domain.
+2. Edit `player.js` and change `const HOST_URL = "banter-yt-player.firer.at";` to your domain.
 3. Upload the files to your domain.
 
 ## Attributes Reference

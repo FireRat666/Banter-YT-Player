@@ -10,7 +10,7 @@ window.addEventListener("bs-loaded", ()=> {
     window.nativePlayerInitialized = true;
 
     // --- Configuration ---
-    const HOST_URL = "tube.webslop.ai";
+    const HOST_URL = "banter-yt-player.firer.at";
 
     function getAttr(scriptNode, name, def) {
         return scriptNode ? (scriptNode.getAttribute(name) || def) : def;
