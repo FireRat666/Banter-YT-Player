@@ -1,20 +1,37 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YouTube Player</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
-        #player { width: 100%; height: 100%; }
-    </style>
-</head>
-<body>
-    <div id="player"></div>
 
-    <script>
-        let player;
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube Player</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #player {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="player"></div>
+
+  <script>
+    let player;
         let currentVideoId = '';
         let targetVolume = 100;
         let isReady = false;
@@ -66,12 +83,22 @@
             });
         };
 
+        // Command Queue
+        let commandQueue = [];
+
         // --- Player Event Handlers ---
         function onPlayerReady(event) {
             isReady = true;
             player.setVolume(targetVolume);
             debugLog('info', 'Player is ready.');
             sendStatus('ready');
+
+            // Process any queued commands
+            if (commandQueue.length > 0) {
+                debugLog('info', `Processing ${commandQueue.length} queued commands.`);
+                commandQueue.forEach(msg => handleCommand(msg));
+                commandQueue = [];
+            }
         }
 
         function onPlayerStateChange(event) {
@@ -137,15 +164,19 @@
             debugLog('info', `Handling command: ${msg.type}`, msg.data || '');
 
             if (!player || !isReady) {
-                debugLog('warn', `Player not ready, ignoring command: ${msg.type}`);
-                // Could queue commands here if needed
+                debugLog('warn', `Player not ready, queuing command: ${msg.type}`);
+                commandQueue.push(msg);
                 return;
             }
 
             switch (msg.type) {
                 case 'LOAD_VIDEO':
                     currentVideoId = msg.data.id;
-                    player.loadVideoById(msg.data.id, msg.data.startTime || 0);
+                    if (msg.data.playing) {
+                        player.loadVideoById(msg.data.id, msg.data.startTime || 0);
+                    } else {
+                        player.cueVideoById(msg.data.id, msg.data.startTime || 0);
+                    }
                     break;
                 case 'PLAY':
                     player.playVideo();
@@ -164,13 +195,20 @@
                     player.unMute();
                     break;
                 case 'SEEK':
-                    player.seekTo(msg.data, true);
+                    // Make sure we convert to a number
+                    const targetTime = Number(msg.data);
+                    if (!isNaN(targetTime)) {
+                        player.seekTo(targetTime, true);
+                    } else {
+                        debugLog('warn', `Invalid seek target: ${msg.data}`);
+                    }
                     break;
                 case 'GET_TIME':
                     sendStatus(player.getPlayerState() === 1 ? 'playing' : 'paused');
                     break;
             }
         }
-    </script>
+  </script>
 </body>
+
 </html>

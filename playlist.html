@@ -275,8 +275,9 @@
                 <button class="btn" id="lockBtn">Unlocked</button>
                 <button class="btn blue" id="resyncBtn">Resync</button>
                 <button class="btn grey" id="prevBtn">&lt;&lt; Prev</button>
+                <button class="btn" id="playPauseBtn" style="background-color: #00b894;">Play</button>
                 <button class="btn grey" id="nextBtn">Next &gt;&gt;</button>
-                <button class="btn grey" id="toggleLogBtn">Logs</button>
+                <!-- <button class="btn grey" id="toggleLogBtn">Logs</button> -->
             </div>
         </div>
         <div class="host-bar" id="hostBar">No host</div>
@@ -305,67 +306,67 @@
         </div>
     </div>
 
-    <button id="copyLogsBtn">Copy Logs</button>
-    <div id="log-container"></div>
+    <!-- <button id="copyLogsBtn">Copy Logs</button>
+    <div id="log-container"></div> -->
 
     <script>
         const logContainer = document.getElementById('log-container');
         const MAX_LOG_ENTRIES = 100;
 
-        // Capture original console methods to prevent recursion
-        const originalConsole = {
-            log: console.log,
-            info: console.info,
-            warn: console.warn,
-            error: console.error
-        };
+        // // Capture original console methods to prevent recursion
+        // const originalConsole = {
+        //     log: console.log,
+        //     info: console.info,
+        //     warn: console.warn,
+        //     error: console.error
+        // };
 
-        // --- On-Screen Debugging ---
-        function uiLog(level, ...args) {
-            // 1. Format the message
-            const message = args.map(arg => {
-                if (arg instanceof Error) return arg.stack;
-                if (typeof arg === 'object' && arg !== null) {
-                    try { return JSON.stringify(arg, null, 2); } catch (e) { return '[Unserializable Object]'; }
-                }
-                return String(arg);
-            }).join(' ');
+        // // --- On-Screen Debugging ---
+        // function uiLog(level, ...args) {
+        //     // 1. Format the message
+        //     const message = args.map(arg => {
+        //         if (arg instanceof Error) return arg.stack;
+        //         if (typeof arg === 'object' && arg !== null) {
+        //             try { return JSON.stringify(arg, null, 2); } catch (e) { return '[Unserializable Object]'; }
+        //         }
+        //         return String(arg);
+        //     }).join(' ');
 
-            // 2. Display in the on-page UI
-            const logElement = document.createElement('div');
-            logElement.className = `log-msg ${level}`;
-            logElement.textContent = message;
+        //     // 2. Display in the on-page UI
+        //     const logElement = document.createElement('div');
+        //     logElement.className = `log-msg ${level}`;
+        //     logElement.textContent = message;
 
-            // Insert at the top
-            logContainer.insertBefore(logElement, logContainer.firstChild);
+        //     // Insert at the top
+        //     logContainer.insertBefore(logElement, logContainer.firstChild);
 
-            // 3. Trim old log entries
-            while (logContainer.children.length > MAX_LOG_ENTRIES) {
-                logContainer.removeChild(logContainer.lastChild);
-            }
+        //     // 3. Trim old log entries
+        //     while (logContainer.children.length > MAX_LOG_ENTRIES) {
+        //         logContainer.removeChild(logContainer.lastChild);
+        //     }
 
-            // 4. Also send to native console
-            const logFn = originalConsole[level] || originalConsole.log;
-            logFn.apply(console, args);
+        //     // 4. Also send to native console
+        //     const logFn = originalConsole[level] || originalConsole.log;
+        //     logFn.apply(console, args);
 
-            // 5. Forward to space script if possible
-            if(window.bantermessage) {
-                 try {
-                    window.bantermessage(JSON.stringify({ type: "LOG", data: `[PlaylistUI] ${message}` }));
-                } catch (e) {
-                    originalConsole.error("Failed to send log message to space:", e);
-                }
-            }
-        }
+        //     // 5. Forward to space script if possible
+        //     if(window.bantermessage) {
+        //          try {
+        //             window.bantermessage(JSON.stringify({ type: "LOG", data: `[PlaylistUI] ${message}` }));
+        //         } catch (e) {
+        //             originalConsole.error("Failed to send log message to space:", e);
+        //         }
+        //     }
+        // }
 
-        // Override default console methods
-        console.log = (...args) => uiLog('log', ...args);
-        console.info = (...args) => uiLog('info', ...args);
-        console.warn = (...args) => uiLog('warn', ...args);
-        console.error = (...args) => uiLog('error', ...args);
-        window.onerror = (message, source, lineno, colno, error) => {
-            uiLog('error', `Uncaught: ${message}`, error);
-        };
+        // // Override default console methods
+        // console.log = (...args) => uiLog('log', ...args);
+        // console.info = (...args) => uiLog('info', ...args);
+        // console.warn = (...args) => uiLog('warn', ...args);
+        // console.error = (...args) => uiLog('error', ...args);
+        // window.onerror = (message, source, lineno, colno, error) => {
+        //     uiLog('error', `Uncaught: ${message}`, error);
+        // };
 
         // --- App Logic ---
         console.log("Page loaded");
@@ -377,6 +378,7 @@
             if (typeof window.bantermessage === 'function' || typeof window.bantermenumessage === 'function') {
                 console.info("Messaging API became available asynchronously!");
                 clearInterval(banterCheckInterval);
+                send('REQUEST_STATE');
             }
         }, 500);
 
@@ -487,8 +489,15 @@
                 }
             }
 
+            // 3. Fallback to postMessage to parent (Web/Iframe preview debugging)
+            if (!sent && window.parent && window.parent !== window) {
+                window.parent.postMessage(msg, '*');
+                console.log("Sent via parent.postMessage");
+                sent = true;
+            }
+
             if (!sent) {
-                console.warn("Failed to send message: No messaging function available.");
+                console.warn("Failed to send message: No messaging function available. Are you running this inside Banter?");
             }
         }
 
@@ -497,42 +506,43 @@
         document.getElementById('resyncBtn').addEventListener('click', () => send('RESYNC'));
         document.getElementById('prevBtn').addEventListener('click', () => send('PREV'));
         document.getElementById('nextBtn').addEventListener('click', () => send('NEXT'));
+        document.getElementById('playPauseBtn').addEventListener('click', () => send('PLAY_PAUSE'));
         document.getElementById('addBtn').addEventListener('click', () => addVideo());
         document.getElementById('historyBtn').addEventListener('click', showRecentSearches);
 
-        const toggleLogBtn = document.getElementById('toggleLogBtn');
-        const copyLogsBtn = document.getElementById('copyLogsBtn');
+        // const toggleLogBtn = document.getElementById('toggleLogBtn');
+        // const copyLogsBtn = document.getElementById('copyLogsBtn');
 
-        toggleLogBtn.addEventListener('click', () => {
-            const el = document.getElementById('log-container');
-            const app = document.querySelector('.app');
-            const isHidden = (el.style.display === 'none' || el.style.display === '');
+        // toggleLogBtn.addEventListener('click', () => {
+        //     const el = document.getElementById('log-container');
+        //     const app = document.querySelector('.app');
+        //     const isHidden = (el.style.display === 'none' || el.style.display === '');
 
-            if (isHidden) {
-                el.style.display = 'flex';
-                copyLogsBtn.style.display = 'block';
-                app.style.paddingBottom = '25%';
-            } else {
-                el.style.display = 'none';
-                copyLogsBtn.style.display = 'none';
-                app.style.paddingBottom = '0';
-            }
-        });
+        //     if (isHidden) {
+        //         el.style.display = 'flex';
+        //         copyLogsBtn.style.display = 'block';
+        //         app.style.paddingBottom = '25%';
+        //     } else {
+        //         el.style.display = 'none';
+        //         copyLogsBtn.style.display = 'none';
+        //         app.style.paddingBottom = '0';
+        //     }
+        // });
 
-        copyLogsBtn.addEventListener('click', () => {
-            const logs = Array.from(logContainer.children)
-                .reverse() // DOM is reversed, so reverse back to chronological
-                .map(div => div.textContent)
-                .join('\n');
+        // copyLogsBtn.addEventListener('click', () => {
+        //     const logs = Array.from(logContainer.children)
+        //         .reverse() // DOM is reversed, so reverse back to chronological
+        //         .map(div => div.textContent)
+        //         .join('\n');
 
-            navigator.clipboard.writeText(logs).then(() => {
-                const originalText = copyLogsBtn.textContent;
-                copyLogsBtn.textContent = 'Copied!';
-                setTimeout(() => copyLogsBtn.textContent = originalText, 2000);
-            }).catch(err => {
-                console.error('Failed to copy logs:', err);
-            });
-        });
+        //     navigator.clipboard.writeText(logs).then(() => {
+        //         const originalText = copyLogsBtn.textContent;
+        //         copyLogsBtn.textContent = 'Copied!';
+        //         setTimeout(() => copyLogsBtn.textContent = originalText, 2000);
+        //     }).catch(err => {
+        //         console.error('Failed to copy logs:', err);
+        //     });
+        // });
 
         document.getElementById('urlInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') addVideo();
@@ -776,6 +786,10 @@
 
             document.getElementById('lockBtn').textContent = isLocked ? 'Locked' : 'Unlocked';
             document.getElementById('lockBtn').className = isLocked ? 'btn locked' : 'btn red';
+
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            playPauseBtn.textContent = currentState.playing ? 'Pause' : 'Play';
+            playPauseBtn.style.backgroundColor = currentState.playing ? '#d63031' : '#00b894';
 
             const hostBar = document.getElementById('hostBar');
             hostBar.textContent = isLocked && currentState.hostId ? 'Locked by host' : (isKaraoke ? 'Karaoke Queue' : 'Open playlist');
