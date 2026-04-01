@@ -90,6 +90,10 @@ window.addEventListener("bs-loaded", ()=> {
             playlistRot: parseVector3(getAttr(currentScript, "playlist-rotation", "0 -30 0"), new BS.Vector3(0, -30, 0)),
             playlistScale: parseVector3(getAttr(currentScript, "playlist-scale", "2 2 1"), new BS.Vector3(2, 2, 1)),
             billboard: getAttr(currentScript, "billboard", "false") === "true",
+            mipmaps: getAttr(currentScript, "mipmaps", "1"),
+            pixelsperunit: getAttr(currentScript, "pixelsperunit", "1200"),
+            width: getAttr(currentScript, "width", "1280"),
+            height: getAttr(currentScript, "height", "720"),
             lockPosition: getAttr(currentScript, "lock-position", "true") === "true",
             syncInterval: 2000
         };
@@ -138,8 +142,8 @@ window.addEventListener("bs-loaded", ()=> {
             const screenRb = await screenObj.AddComponent(new BS.BanterRigidbody(1, 10, 10, CONFIG.lockPosition, false, new BS.Vector3(0,0,0), 0, false, false, false, false, false, false, new BS.Vector3(0,0,0), new BS.Vector3(0,0,0)));
 
             const playerUrl = `https://${HOST_URL}/youtube_player.html`;
-            // Fixed constructor for Quest compatibility: (url, isWorld, width, height)
-            videoPlayer = await screenObj.AddComponent(new BS.BanterBrowser(playerUrl, 1, 1280, 720));
+
+            videoPlayer = await screenObj.AddComponent(new BS.BanterBrowser(playerUrl, CONFIG.mipmaps, CONFIG.pixelsperunit, CONFIG.width, CONFIG.height, null));
             videoPlayer.ToggleInteraction(true);
 
             screenObj.On("browser-message", handlePlayerMessage);
@@ -169,8 +173,8 @@ window.addEventListener("bs-loaded", ()=> {
                 pTrans.localScale = CONFIG.playlistScale;
 
                 const playlistUrl = `https://${HOST_URL}/playlist.html?instance=${CONFIG.instanceId}&mode=${CONFIG.mode}&user=${scene.localUser.uid}-_-${encodeURIComponent(scene.localUser.name)}`;
-                // Fixed constructor: (url, isWorld, width, height)
-                inSpacePlaylistBrowserComponent = await inSpacePlaylistBrowserGo.AddComponent(new BS.BanterBrowser(playlistUrl, 1, 1024, 1024));
+
+                inSpacePlaylistBrowserComponent = await inSpacePlaylistBrowserGo.AddComponent(new BS.BanterBrowser(playlistUrl, 1, 1200, 1280, 720));
                 inSpacePlaylistBrowserComponent.ToggleInteraction(true);
                 await inSpacePlaylistBrowserGo.SetLayer(5);
 
