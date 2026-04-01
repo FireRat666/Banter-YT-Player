@@ -55,6 +55,20 @@ window.addEventListener("bs-loaded", ()=> {
             return def;
         }
 
+        function parseScaleVector(str, def) {
+            if (!str) return def;
+            const parts = str.split(/[ ,]+/).filter(Boolean).map(Number);
+            if (parts.length === 0 || parts.some(isNaN)) return def;
+            if (parts.length === 1) {
+                return new BS.Vector3(3.2 * parts[0], 1.8 * parts[0], 1);
+            } else if (parts.length === 2) {
+                return new BS.Vector3(parts[0], parts[1], 1);
+            } else if (parts.length >= 3) {
+                return new BS.Vector3(parts[0], parts[1], parts[2]);
+            }
+            return def;
+        }
+
         const DEFAULT_PLAYLIST = [
             { title: "Spring - Blender Open Movie", id: "WhWc3b3KhnY", user: "System" },
             { title: "HERO – Blender Grease Pencil Showcase", id: "pKmSdY56VtY", user: "System" },
@@ -80,7 +94,7 @@ window.addEventListener("bs-loaded", ()=> {
             volume: parseFloat(getAttr(currentScript, "volume", "40")),
             screenPos: parseVector3(getAttr(currentScript, "position", "0 1.5 4"), new BS.Vector3(0, 1.5, 4)),
             screenRot: parseVector3(getAttr(currentScript, "rotation", "0 0 0"), new BS.Vector3(0, 0, 0)),
-            screenScale: parseVector3(getAttr(currentScript, "scale", "3.2 1.8 1"), new BS.Vector3(3.2, 1.8, 1)),
+            screenScale: parseScaleVector(getAttr(currentScript, "scale", "1"), new BS.Vector3(3.2, 1.8, 1)),
             buttonPos: parseVector3(getAttr(currentScript, "button-position", "0 0 0"), new BS.Vector3(0, 0, 0)),
             buttonRot: parseVector3(getAttr(currentScript, "button-rotation", "0 0 0"), new BS.Vector3(0, 0, 0)),
             buttonScale: parseVector3(getAttr(currentScript, "button-scale", "1 1 1"), new BS.Vector3(1, 1, 1)),

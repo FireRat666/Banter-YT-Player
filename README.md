@@ -20,7 +20,7 @@ Add the script tag inside your `<a-scene>` in your space's `index.html`.
     instance="main-screen"
     position="0 1.5 4" 
     rotation="0 0 0" 
-    scale="3.2 1.8 1" 
+    scale="1" 
     volume="40"
     billboard="false"
     lock-position="true"
@@ -45,7 +45,7 @@ You can customize the player by adding the following attributes to the `<script>
 | `volume` | `40` | Default startup volume (0-100). |
 | `position` | `0 1.5 4` | Initial position of the screen in the space. |
 | `rotation` | `0 0 0` | Initial rotation of the screen. |
-| `scale` | `3.2 1.8 1` | Scale of the screen. |
+| `scale` | `1` | Scale of the screen. Provide a single number (e.g., `1`) to uniformly scale the 16:9 player, or two numbers (e.g., `2 4`) to manually set X and Y scale individually. |
 | `billboard` | `false` | If `"true"`, the screen will always face the user. |
 | `lock-position` | `true` | If `"false"`, the player screen can be grabbed and moved by users. |
 | `hand-controls` | `true` | If `"true"`, play/pause and volume controls attach to the user's left hand. |
